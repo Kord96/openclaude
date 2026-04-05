@@ -27,7 +27,7 @@ import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_MODEL,
   deleteProfileFile,
-  loadProfileFile,
+  loadProfileFileWithFallback,
   maskSecretForDisplay,
   redactSecretValueForDisplay,
   sanitizeApiKey,
@@ -155,7 +155,7 @@ export function buildCurrentProviderSummary(options?: {
   persisted?: ProfileFile | null
 }): CurrentProviderSummary {
   const processEnv = options?.processEnv ?? process.env
-  const persisted = options?.persisted ?? loadProfileFile()
+  const persisted = options?.persisted ?? loadProfileFileWithFallback().profile
   const savedProfileLabel = persisted?.profile ?? 'none'
 
   if (isEnvTruthy(processEnv.CLAUDE_CODE_USE_GEMINI)) {

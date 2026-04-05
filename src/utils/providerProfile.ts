@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import {
   DEFAULT_CODEX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
@@ -13,6 +13,7 @@ import {
   type RecommendationGoal,
 } from './providerRecommendation.ts'
 import { readGeminiAccessToken } from './geminiCredentials.ts'
+import { getClaudeConfigHomeDir } from './envUtils.ts'
 import { getOllamaChatBaseUrl } from './providerDiscovery.ts'
 
 export const PROFILE_FILE_NAME = '.openclaude-profile.json'
@@ -75,9 +76,16 @@ type SecretValueSource = Partial<
   >
 >
 
+type ProfileFileScope = 'local' | 'global'
+
 type ProfileFileLocation = {
   cwd?: string
   filePath?: string
+  scope?: ProfileFileScope
+}
+
+export function getGlobalProfileFilePath(): string {
+  return join(getClaudeConfigHomeDir(), PROFILE_FILE_NAME)
 }
 
 function resolveProfileFilePath(options?: ProfileFileLocation): string {
@@ -85,7 +93,316 @@ function resolveProfileFilePath(options?: ProfileFileLocation): string {
     return options.filePath
   }
 
+  if (options?.scope === 'global') {
+    return getGlobalProfileFilePath()
+  }
+
   return resolve(options?.cwd ?? process.cwd(), PROFILE_FILE_NAME)
+}
+
+export function loadProfileFileWithFallback(options?: ProfileFileLocation): {
+  profile: ProfileFile | null
+  path: string | null
+  scope: ProfileFileScope | null
+} {
+  const localPath = resolveProfileFilePath({
+    cwd: options?.cwd,
+    filePath: options?.scope === 'local' ? options?.filePath : undefined,
+    scope: 'local',
+  })
+  const localProfile = loadProfileFile({ filePath: localPath })
+  if (localProfile) {
+    return {
+      profile: localProfile,
+      path: localPath,
+      scope: 'local',
+    }
+  }
+
+  const globalPath =
+    options?.scope === 'local'
+      ? null
+      : resolveProfileFilePath({
+          filePath: options?.scope === 'global' ? options?.filePath : undefined,
+          scope: 'global',
+        })
+  const globalProfile = globalPath
+    ? loadProfileFile({ filePath: globalPath })
+    : null
+
+  if (globalProfile) {
+    return {
+      profile: globalProfile,
+      path: globalPath,
+      scope: 'global',
+    }
+  }
+
+  return {
+    profile: null,
+    path: null,
+    scope: null,
+  }
+}
+
+export function loadEffectiveProfileFile(options?: ProfileFileLocation): ProfileFile | null {
+  return loadProfileFileWithFallback(options).profile
+}
+
+export function getEffectiveProfileScope(options?: ProfileFileLocation): ProfileFileScope | null {
+  return loadProfileFileWithFallback(options).scope
+}
+
+export function getEffectiveProfilePath(options?: ProfileFileLocation): string | null {
+  return loadProfileFileWithFallback(options).path
+}
+
+export function saveGlobalProfileFile(profileFile: ProfileFile): string {
+  return saveProfileFile(profileFile, { scope: 'global' })
+}
+
+export function deleteGlobalProfileFile(): string {
+  return deleteProfileFile({ scope: 'global' })
+}
+
+export function deleteEffectiveProfileFile(options?: ProfileFileLocation): string | null {
+  const resolved = loadProfileFileWithFallback(options)
+  if (!resolved.path) {
+    return null
+  }
+  rmSync(resolved.path, { force: true })
+  return resolved.path
+}
+
+export function hasLocalProfileFile(options?: ProfileFileLocation): boolean {
+  return loadProfileFile({
+    cwd: options?.cwd,
+    filePath: options?.scope === 'local' ? options?.filePath : undefined,
+    scope: 'local',
+  }) !== null
+}
+
+export function hasGlobalProfileFile(): boolean {
+  return loadProfileFile({ scope: 'global' }) !== null
+}
+
+export function ensureGlobalProfileDirExists(): void {
+  mkdirSync(dirname(getGlobalProfileFilePath()), { recursive: true })
+}
+
+export function resolvePersistedProfile(options?: ProfileFileLocation): ProfileFile | null {
+  if (options?.scope === 'local' || options?.scope === 'global') {
+    return loadProfileFile(options)
+  }
+  return loadEffectiveProfileFile(options)
+}
+
+export function resolvePersistedProfileLabel(options?: ProfileFileLocation): string {
+  const resolved = loadProfileFileWithFallback(options)
+  if (!resolved.profile) {
+    return 'none'
+  }
+  return `${resolved.profile.profile} (${resolved.scope})`
+}
+
+export function resolvePersistedProfileDescription(options?: ProfileFileLocation): string {
+  const resolved = loadProfileFileWithFallback(options)
+  if (!resolved.profile) {
+    return 'none'
+  }
+  return `${resolved.profile.profile} profile from ${resolved.scope} scope`
+}
+
+export function resolvePersistedProfilePath(options?: ProfileFileLocation): string | null {
+  return loadProfileFileWithFallback(options).path
+}
+
+export function getProfileFilePath(options?: ProfileFileLocation): string {
+  return resolveProfileFilePath(options)
+}
+
+export type { ProfileFileScope }
+
+export function saveProfileForScope(
+  profileFile: ProfileFile,
+  scope: ProfileFileScope,
+): string {
+  return saveProfileFile(profileFile, { scope })
+}
+
+export function loadProfileForScope(scope: ProfileFileScope): ProfileFile | null {
+  return loadProfileFile({ scope })
+}
+
+export function deleteProfileForScope(scope: ProfileFileScope): string {
+  return deleteProfileFile({ scope })
+}
+
+export function defaultProfileScope(): ProfileFileScope {
+  return 'local'
+}
+
+export function fallbackProfileScope(): ProfileFileScope {
+  return 'global'
+}
+
+export function resolveProfileScopes(): readonly ProfileFileScope[] {
+  return ['local', 'global'] as const
+}
+
+export function isProfileScope(value: unknown): value is ProfileFileScope {
+  return value === 'local' || value === 'global'
+}
+
+export function parseProfileScope(value: string | null | undefined): ProfileFileScope | null {
+  if (!value) return null
+  const normalized = value.trim().toLowerCase()
+  return isProfileScope(normalized) ? normalized : null
+}
+
+export function shouldUseGlobalProfileFallback(options?: { processEnv?: NodeJS.ProcessEnv }): boolean {
+  const processEnv = options?.processEnv ?? process.env
+  return !hasExplicitProviderSelection(processEnv)
+}
+
+export function loadDefaultProfileFile(options?: ProfileFileLocation): ProfileFile | null {
+  return resolvePersistedProfile(options)
+}
+
+export function loadLocalProfileFile(options?: ProfileFileLocation): ProfileFile | null {
+  return loadProfileFile({
+    cwd: options?.cwd,
+    filePath: options?.filePath,
+    scope: 'local',
+  })
+}
+
+export function loadGlobalProfileFile(options?: ProfileFileLocation): ProfileFile | null {
+  return loadProfileFile({
+    filePath: options?.filePath,
+    scope: 'global',
+  })
+}
+
+export function saveLocalProfileFile(profileFile: ProfileFile, options?: ProfileFileLocation): string {
+  return saveProfileFile(profileFile, {
+    cwd: options?.cwd,
+    filePath: options?.filePath,
+    scope: 'local',
+  })
+}
+
+export function resolveProfileSourceLabel(options?: ProfileFileLocation): string {
+  const scope = getEffectiveProfileScope(options)
+  return scope ?? 'none'
+}
+
+export function formatProfileSourceLabel(scope: ProfileFileScope | null): string {
+  return scope ?? 'none'
+}
+
+export function formatProfileLocation(scope: ProfileFileScope | null, filePath: string | null): string {
+  if (!scope || !filePath) {
+    return 'none'
+  }
+  return `${scope}:${filePath}`
+}
+
+export function loadProfilePathForScope(scope: ProfileFileScope): string {
+  return resolveProfileFilePath({ scope })
+}
+
+export function profileExistsForScope(scope: ProfileFileScope): boolean {
+  return existsSync(resolveProfileFilePath({ scope }))
+}
+
+export function ensureProfileDirExists(options?: ProfileFileLocation): void {
+  mkdirSync(dirname(resolveProfileFilePath(options)), { recursive: true })
+}
+
+export function saveProfileFileEnsuringDir(
+  profileFile: ProfileFile,
+  options?: ProfileFileLocation,
+): string {
+  ensureProfileDirExists(options)
+  return saveProfileFile(profileFile, options)
+}
+
+export function getPreferredProfilePath(options?: ProfileFileLocation): string {
+  return resolveProfileFilePath(options)
+}
+
+export function listResolvedProfilePaths(options?: ProfileFileLocation): string[] {
+  const localPath = resolveProfileFilePath({
+    cwd: options?.cwd,
+    scope: 'local',
+  })
+  const globalPath = resolveProfileFilePath({ scope: 'global' })
+  return [localPath, globalPath]
+}
+
+export function getProfileResolutionOrder(): readonly ProfileFileScope[] {
+  return ['local', 'global'] as const
+}
+
+export function isUsingFallbackProfile(options?: ProfileFileLocation): boolean {
+  return getEffectiveProfileScope(options) === 'global'
+}
+
+export function loadStartupProfile(options?: ProfileFileLocation): ProfileFile | null {
+  return resolvePersistedProfile(options)
+}
+
+export function getStartupProfileSource(options?: ProfileFileLocation): ProfileFileScope | null {
+  return getEffectiveProfileScope(options)
+}
+
+export function saveProfileDefault(profileFile: ProfileFile): string {
+  return saveLocalProfileFile(profileFile)
+}
+
+export function deleteProfileDefault(): string {
+  return deleteProfileFile({ scope: 'local' })
+}
+
+export function loadProfileDefault(): ProfileFile | null {
+  return loadDefaultProfileFile()
+}
+
+export function resolveProfilePath(options?: ProfileFileLocation): string {
+  return getProfileFilePath(options)
+}
+
+export function resolveProfileFallbackPath(): string {
+  return getGlobalProfileFilePath()
+}
+
+export function resolveProfilePrimaryPath(options?: ProfileFileLocation): string {
+  return resolveProfileFilePath({
+    cwd: options?.cwd,
+    filePath: options?.filePath,
+    scope: 'local',
+  })
+}
+
+export function deleteResolvedProfile(options?: ProfileFileLocation): string | null {
+  return deleteEffectiveProfileFile(options)
+}
+
+export function loadProfileResolution(options?: ProfileFileLocation): {
+  profile: ProfileFile | null
+  scope: ProfileFileScope | null
+  path: string | null
+} {
+  return loadProfileFileWithFallback(options)
+}
+
+export function hasAnyProfileFile(options?: ProfileFileLocation): boolean {
+  return loadEffectiveProfileFile(options) !== null
+}
+
+export function getDefaultProfileResolutionOrder(): readonly ProfileFileScope[] {
+  return getProfileResolutionOrder()
 }
 
 export function isProviderProfile(value: unknown): value is ProviderProfile {
@@ -660,13 +977,22 @@ export async function buildStartupEnvFromProfile(options?: {
   getOllamaChatBaseUrl?: (baseUrl?: string) => string
   resolveOllamaDefaultModel?: (goal: RecommendationGoal) => Promise<string>
   readGeminiAccessToken?: () => string | undefined
+  localFilePath?: string
+  globalFilePath?: string
+  cwd?: string
 }): Promise<NodeJS.ProcessEnv> {
   const processEnv = options?.processEnv ?? process.env
   if (hasExplicitProviderSelection(processEnv)) {
     return processEnv
   }
 
-  const persisted = options?.persisted ?? loadProfileFile()
+  const persisted =
+    options?.persisted ??
+    loadProfileFileWithFallback({
+      cwd: options?.cwd,
+      localFilePath: options?.localFilePath,
+      globalFilePath: options?.globalFilePath,
+    }).profile
   if (!persisted) {
     return processEnv
   }

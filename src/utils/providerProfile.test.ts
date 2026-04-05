@@ -13,8 +13,10 @@ import {
   buildOllamaProfileEnv,
   buildOpenAIProfileEnv,
   createProfileFile,
+  getGlobalProfileFilePath,
   maskSecretForDisplay,
   loadProfileFile,
+  loadProfileFileWithFallback,
   PROFILE_FILE_NAME,
   redactSecretValueForDisplay,
   saveProfileFile,
@@ -417,6 +419,110 @@ test('saveProfileFile writes a profile that loadProfileFile can read back', () =
   }
 })
 
+test('getGlobalProfileFilePath uses Claude config home', () => {
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-global-config-'))
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+    assert.equal(getGlobalProfileFilePath(), join(configDir, PROFILE_FILE_NAME))
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    rmSync(configDir, { recursive: true, force: true })
+  }
+})
+
+test('loadProfileFile can read a global scoped profile', () => {
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-global-config-'))
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+
+    const persisted = createProfileFile('openai', {
+      OPENAI_API_KEY: 'sk-test',
+      OPENAI_MODEL: 'gpt-4o',
+    })
+
+    saveProfileFile(persisted, { scope: 'global' })
+    assert.deepEqual(loadProfileFile({ scope: 'global' }), persisted)
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    rmSync(configDir, { recursive: true, force: true })
+  }
+})
+
+test('loadProfileFileWithFallback prefers local profile over global profile', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'openclaude-local-profile-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-global-config-'))
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+
+    const localProfile = createProfileFile('ollama', {
+      OPENAI_MODEL: 'qwen2.5-coder:7b',
+      OPENAI_BASE_URL: 'http://localhost:11434/v1',
+    })
+    const globalProfile = createProfileFile('gemini', {
+      GEMINI_API_KEY: 'gem-global',
+      GEMINI_MODEL: 'gemini-2.5-flash',
+    })
+
+    saveProfileFile(localProfile, { cwd })
+    saveProfileFile(globalProfile, { scope: 'global' })
+
+    const resolved = loadProfileFileWithFallback({ cwd })
+    assert.deepEqual(resolved.profile, localProfile)
+    assert.equal(resolved.scope, 'local')
+    assert.equal(resolved.path, join(cwd, PROFILE_FILE_NAME))
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    rmSync(cwd, { recursive: true, force: true })
+    rmSync(configDir, { recursive: true, force: true })
+  }
+})
+
+test('loadProfileFileWithFallback returns global profile when local profile is missing', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'openclaude-no-local-profile-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-global-config-'))
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+
+    const globalProfile = createProfileFile('openai', {
+      OPENAI_API_KEY: 'sk-global',
+      OPENAI_MODEL: 'gpt-4o-mini',
+    })
+
+    saveProfileFile(globalProfile, { scope: 'global' })
+
+    const resolved = loadProfileFileWithFallback({ cwd })
+    assert.deepEqual(resolved.profile, globalProfile)
+    assert.equal(resolved.scope, 'global')
+    assert.equal(resolved.path, join(configDir, PROFILE_FILE_NAME))
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    rmSync(cwd, { recursive: true, force: true })
+    rmSync(configDir, { recursive: true, force: true })
+  }
+})
+
+test('loadProfileFileWithFallback returns null when neither local nor global profile exists', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'openclaude-no-profile-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-global-config-'))
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+
+    const resolved = loadProfileFileWithFallback({ cwd })
+    assert.equal(resolved.profile, null)
+    assert.equal(resolved.scope, null)
+    assert.equal(resolved.path, null)
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    rmSync(cwd, { recursive: true, force: true })
+    rmSync(configDir, { recursive: true, force: true })
+  }
+})
+
 test('buildStartupEnvFromProfile applies persisted gemini settings when no provider is explicitly selected', async () => {
   const env = await buildStartupEnvFromProfile({
     persisted: profile('gemini', {
@@ -430,6 +536,69 @@ test('buildStartupEnvFromProfile applies persisted gemini settings when no provi
   assert.equal(env.CLAUDE_CODE_USE_OPENAI, undefined)
   assert.equal(env.GEMINI_API_KEY, 'gem-test')
   assert.equal(env.GEMINI_MODEL, 'gemini-2.5-flash')
+})
+
+test('buildStartupEnvFromProfile falls back to global profile when local profile is missing', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'openclaude-no-local-profile-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-global-config-'))
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+
+    const globalProfile = createProfileFile('gemini', {
+      GEMINI_API_KEY: 'gem-global',
+      GEMINI_MODEL: 'gemini-2.5-flash',
+    })
+    saveProfileFile(globalProfile, { scope: 'global' })
+
+    const env = await buildStartupEnvFromProfile({
+      processEnv: {},
+      cwd,
+    })
+
+    assert.equal(env.CLAUDE_CODE_USE_GEMINI, '1')
+    assert.equal(env.GEMINI_API_KEY, 'gem-global')
+    assert.equal(env.GEMINI_MODEL, 'gemini-2.5-flash')
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    rmSync(cwd, { recursive: true, force: true })
+    rmSync(configDir, { recursive: true, force: true })
+  }
+})
+
+test('buildStartupEnvFromProfile prefers local profile over global fallback', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'openclaude-local-profile-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-global-config-'))
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+
+    saveProfileFile(
+      createProfileFile('gemini', {
+        GEMINI_API_KEY: 'gem-global',
+        GEMINI_MODEL: 'gemini-2.5-flash',
+      }),
+      { scope: 'global' },
+    )
+
+    saveProfileFile(
+      createProfileFile('ollama', {
+        OPENAI_BASE_URL: 'http://localhost:11434/v1',
+        OPENAI_MODEL: 'qwen2.5-coder:7b',
+      }),
+      { cwd },
+    )
+
+    const env = await buildStartupEnvFromProfile({ processEnv: {}, cwd })
+    assert.equal(env.CLAUDE_CODE_USE_OPENAI, '1')
+    assert.equal(env.OPENAI_BASE_URL, 'http://localhost:11434/v1')
+    assert.equal(env.OPENAI_MODEL, 'qwen2.5-coder:7b')
+    assert.equal(env.CLAUDE_CODE_USE_GEMINI, undefined)
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    rmSync(cwd, { recursive: true, force: true })
+    rmSync(configDir, { recursive: true, force: true })
+  }
 })
 
 test('buildStartupEnvFromProfile rehydrates stored Gemini access token for access-token profile mode', async () => {
@@ -483,6 +652,37 @@ test('buildStartupEnvFromProfile leaves explicit provider selections untouched',
   assert.equal(env, processEnv)
   assert.equal(env.CLAUDE_CODE_USE_GEMINI, '1')
   assert.equal(env.OPENAI_API_KEY, undefined)
+})
+
+test('buildStartupEnvFromProfile ignores global fallback when explicit provider selection exists', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'openclaude-no-local-profile-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-global-config-'))
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = configDir
+
+    saveProfileFile(
+      createProfileFile('gemini', {
+        GEMINI_API_KEY: 'gem-global',
+        GEMINI_MODEL: 'gemini-2.5-flash',
+      }),
+      { scope: 'global' },
+    )
+
+    const processEnv = {
+      CLAUDE_CODE_USE_OPENAI: '1',
+      OPENAI_API_KEY: 'sk-live',
+      OPENAI_MODEL: 'gpt-4o',
+    }
+
+    const env = await buildStartupEnvFromProfile({ processEnv, cwd })
+    assert.equal(env, processEnv)
+    assert.equal(env.GEMINI_API_KEY, undefined)
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    rmSync(cwd, { recursive: true, force: true })
+    rmSync(configDir, { recursive: true, force: true })
+  }
 })
 
 test('buildStartupEnvFromProfile treats explicit falsey provider flags as user intent', async () => {

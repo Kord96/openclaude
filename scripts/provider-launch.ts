@@ -9,7 +9,7 @@ import {
 } from '../src/utils/providerRecommendation.ts'
 import {
   buildLaunchEnv,
-  loadProfileFile,
+  loadProfileFileWithFallback,
   selectAutoProfile,
   type ProfileFile,
   type ProviderProfile,
@@ -77,7 +77,7 @@ function parseLaunchOptions(argv: string[]): LaunchOptions {
 }
 
 function loadPersistedProfile(): ProfileFile | null {
-  return loadProfileFile()
+  return loadProfileFileWithFallback().profile
 }
 
 async function resolveOllamaDefaultModel(
