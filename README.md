@@ -1,6 +1,15 @@
-# OpenClaude
+# Klaude
 
-OpenClaude is an open-source coding-agent CLI for cloud and local model providers.
+Klaude is an open-source coding-agent runtime for cloud and local model providers.
+
+`openclaude` and `openclaude-daemon` remain available as compatibility aliases while the fork identity is being separated.
+
+## Fork Notice
+
+Klaude is a hard fork of OpenClaude focused on persistent agent runtimes, Kafka-native transport, container/pod execution, and aggressive runtime customization. Upstream OpenClaude may continue to be merged selectively, but Klaude now follows its own product and architecture direction.
+
+`openclaude` and `openclaude-daemon` remain available as compatibility aliases during the transition to the `klaude` and `klaude-daemon` names.
+
 
 Use OpenAI-compatible APIs, Gemini, GitHub Models, Codex, Ollama, Atomic Chat, and other supported backends while keeping one terminal-first workflow: prompts, tools, agents, MCP, slash commands, and streaming output.
 
@@ -12,7 +21,7 @@ Use OpenAI-compatible APIs, Gemini, GitHub Models, Codex, Ollama, Atomic Chat, a
 
 [Quick Start](#quick-start) | [Setup Guides](#setup-guides) | [Providers](#supported-providers) | [Source Build](#source-build-and-local-development) | [VS Code Extension](#vs-code-extension) | [Community](#community)
 
-## Why OpenClaude
+## Why Klaude
 
 - Use one CLI across cloud APIs and local model backends
 - Save provider profiles inside the app with `/provider`
@@ -25,18 +34,18 @@ Use OpenAI-compatible APIs, Gemini, GitHub Models, Codex, Ollama, Atomic Chat, a
 ### Install
 
 ```bash
-npm install -g @gitlawb/openclaude
+npm install -g @kord/klaude
 ```
 
-If the install later reports `ripgrep not found`, install ripgrep system-wide and confirm `rg --version` works in the same terminal before starting OpenClaude.
+If the install later reports `ripgrep not found`, install ripgrep system-wide and confirm `rg --version` works in the same terminal before starting Klaude.
 
 ### Start
 
 ```bash
-openclaude
+klaude
 ```
 
-Inside OpenClaude:
+Inside Klaude:
 
 - run `/provider` for guided provider setup and saved profiles
 - run `/onboard-github` for GitHub Models onboarding
