@@ -489,6 +489,7 @@ export async function runHeadless(
     setupTrigger?: 'init' | 'maintenance' | undefined
     sessionStartHooksPromise?: ReturnType<typeof processSessionStartHooks>
     setSDKStatus?: (status: SDKStatus) => void
+    structuredIOOverride?: StructuredIO
   },
 ): Promise<void> {
   if (
@@ -584,7 +585,7 @@ export async function runHeadless(
     return
   }
 
-  const structuredIO = getStructuredIO(inputPrompt, options)
+  const structuredIO = options.structuredIOOverride ?? getStructuredIO(inputPrompt, options)
 
   // When emitting NDJSON for SDK clients, any stray write to stdout (debug
   // prints, dependency console.log, library banners) breaks the client's
@@ -4099,6 +4100,11 @@ function runHeadlessStreaming(
         trackReceivedMessageUuid(message.uuid)
       }
 
+      const workload =
+        typeof (message as { workload?: unknown }).workload === 'string'
+          ? (message as { workload?: string }).workload
+          : undefined
+
       enqueue({
         mode: 'prompt' as const,
         // file_attachments rides the protobuf catchall from the web composer.
@@ -4106,6 +4112,7 @@ function runHeadlessStreaming(
         value: await resolveAndPrepend(message, message.message.content),
         uuid: message.uuid,
         priority: message.priority,
+        workload,
       })
       // Increment prompt count for attribution tracking and save snapshot
       // The snapshot persists promptCount so it survives compaction
