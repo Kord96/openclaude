@@ -1,9 +1,11 @@
 {
-  "name": "@gitlawb/openclaude",
+  "name": "@kord/klaude",
   "version": "0.1.7",
-  "description": "Claude Code opened to any LLM — OpenAI, Gemini, DeepSeek, Ollama, and 200+ models",
+  "description": "Klaude — a terminal coding-agent runtime fork built for custom transports, Kafka-native agents, and multi-provider execution",
   "type": "module",
   "bin": {
+    "klaude": "./bin/klaude",
+    "klaude-daemon": "./bin/klaude-daemon",
     "openclaude": "./bin/openclaude",
     "openclaude-daemon": "./bin/openclaude-daemon"
   },
@@ -139,7 +141,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://gitlawb.com/z6MkqDnb7Siv3Cwj7pGJq4T5EsUisECqR8KpnDLwcaZq5TPr/openclaude"
+    "url": "https://github.com/Kord96/klaude"
   },
   "keywords": [
     "claude-code",
